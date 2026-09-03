@@ -1,0 +1,243 @@
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  LOCKED
+  DEACTIVATED
+}
+
+enum CaseStatus {
+  DRAFT
+  ACTIVE
+  UNDER_REVIEW
+  PENDING_COURT
+  CLOSED
+  ARCHIVED
+}
+
+enum CasePriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum DocumentCategory {
+  FIR
+  POLICE_REPORT
+  WITNESS_STATEMENT
+  INVESTIGATION_RECORD
+  CHARGE_SHEET
+  COURT_FILING
+  EVIDENCE
+  FORENSIC_REPORT
+  LEGAL_NOTICE
+  JUDGMENT
+  OTHER
+}
+
+enum DocumentClassification {
+  INTERNAL
+  CONFIDENTIAL
+  HIGHLY_CONFIDENTIAL
+  RESTRICTED
+}
+
+enum DocumentStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  ARCHIVED
+}
+
+enum AuditResult {
+  SUCCESS
+  FAILURE
+  DENIED
+  BLOCKED
+}
+
+model User {
+  id               String        @id @default(uuid())
+  employeeId       String        @unique @map("employee_id")
+  fullName         String        @map("full_name")
+  email            String        @unique
+  badgeNumber      String?       @map("badge_number")
+  passwordHash     String?       @map("password_hash")
+  googleId         String?       @map("google_id")
+  status           AccountStatus @default(ACTIVE)
+  clearanceLevel   String        @default("Level 2 - Confidential") @map("clearance_level")
+  mfaEnabled       Boolean       @default(true) @map("mfa_enabled")
+  departmentId     String?       @map("department_id")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  department       Department?   @relation(fields: [departmentId], references: [id])
+  userRoles        UserRole[]
+  assignedCases    Case[]        @relation("AssignedOfficer")
+  uploadedVersions DocumentVersion[] @relation("UploadedVersions")
+  auditLogs        AuditLog[]
+  approvals        Approval[]
+
+  @@map("users")
+}
+
+model Department {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  code        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  users       User[]
+  cases       Case[]
+
+  @@map("departments")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  userId String @map("user_id")
+  roleId String @map("role_id")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model Case {
+  id                String       @id @default(uuid())
+  caseNumber        String       @unique @map("case_number")
+  title             String
+  description       String?      @db.Text
+  caseType          String       @map("case_type")
+  status            CaseStatus   @default(ACTIVE)
+  priority          CasePriority @default(MEDIUM)
+  departmentId      String       @map("department_id")
+  assignedOfficerId String?      @map("assigned_officer_id")
+  confidentiality   String       @default("CONFIDENTIAL")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+
+  department      Department @relation(fields: [departmentId], references: [id])
+  assignedOfficer User?       @relation("AssignedOfficer", fields: [assignedOfficerId], references: [id])
+  documents       Document[]
+
+  @@map("cases")
+}
+
+model Document {
+  id             String                 @id @default(uuid())
+  caseId         String                 @map("case_id")
+  title          String
+  description    String?                @db.Text
+  category       DocumentCategory
+  classification DocumentClassification @default(CONFIDENTIAL)
+  status         DocumentStatus         @default(DRAFT)
+  currentVersion Int                    @default(1) @map("current_version")
+  createdAt      DateTime               @default(now()) @map("created_at")
+  updatedAt      DateTime               @updatedAt @map("updated_at")
+
+  case     Case              @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  versions DocumentVersion[]
+  approvals Approval[]
+
+  @@map("documents")
+}
+
+model DocumentVersion {
+  id             String   @id @default(uuid())
+  documentId     String   @map("document_id")
+  versionNumber  Int      @map("version_number")
+  fileName       String   @map("file_name")
+  mimeType       String   @map("mime_type")
+  fileSize       Int      @map("file_size")
+  storageKey     String   @map("storage_key")
+  sha256Hash     String   @map("sha256_hash")
+  changeLog      String?  @map("change_log")
+  uploadedById   String   @map("uploaded_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  uploadedBy User     @relation("UploadedVersions", fields: [uploadedById], references: [id])
+
+  @@unique([documentId, versionNumber])
+  @@map("document_versions")
+}
+
+model Approval {
+  id         String   @id @default(uuid())
+  documentId String   @map("document_id")
+  reviewerId String   @map("reviewer_id")
+  status     String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  comments   String?  @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  reviewer User     @relation(fields: [reviewerId], references: [id])
+
+  @@map("approvals")
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  eventId    String      @map("event_id")
+  action     String
+  userId     String?     @map("user_id")
+  entityType String      @map("entity_type")
+  entityId   String      @map("entity_id")
+  result     AuditResult @default(SUCCESS)
+  details    String?     @db.Text
+  ipAddress  String?     @map("ip_address")
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
