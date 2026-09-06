@@ -23,7 +23,8 @@ import {
   Eye,
   CheckCircle,
   XCircle,
-  UserPlus
+  UserPlus,
+  AlertTriangle
 } from 'lucide-react';
 import DocumentUploadModal from '../documents/DocumentUploadModal';
 import VersionHistoryModal from '../documents/VersionHistoryModal';
@@ -283,7 +284,7 @@ export default function CaseDetails({ caseId, onBack }: CaseDetailsProps) {
       </div>
 
       {/* TAB CONTENT AREA */}
-      <div className="bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-2xs">
+      <div className="bg-[#FFFFFF] p-6 rounded-2xl border border-[#E2E8F0] shadow-2xs">
         
         {/* 1. OVERVIEW TAB */}
         {activeTab === 'overview' && (
@@ -450,9 +451,29 @@ export default function CaseDetails({ caseId, onBack }: CaseDetailsProps) {
                       )}
 
                       {vRes && (
-                        <div className="p-2 rounded bg-[#ECFDF5] text-[#16845B] border border-[#16845B]/20 text-xs font-semibold flex items-center gap-2">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>SHA-256 Checksum Verified</span>
+                        <div
+                          className={`p-3 rounded-lg border flex items-center justify-between text-xs font-semibold ${
+                            vRes.valid
+                              ? 'bg-[#ECFDF5] text-[#16845B] border-[#16845B]/20'
+                              : 'bg-red-50 text-red-700 border-red-200 animate-pulse'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            {vRes.valid ? (
+                              <>
+                                <CheckCircle2 className="w-4 h-4 text-[#16845B]" />
+                                <span>Cryptographic SHA-256 Checksum: MATCH VALID</span>
+                              </>
+                            ) : (
+                              <>
+                                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                                <span className="font-bold">🚨 INTEGRITY MISMATCH DETECTED: File on disk has been tampered with or modified!</span>
+                              </>
+                            )}
+                          </div>
+                          <span className="font-mono text-[10px] opacity-80">
+                            Verified: {new Date(vRes.checkedAt).toLocaleTimeString()}
+                          </span>
                         </div>
                       )}
                     </div>

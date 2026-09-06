@@ -1,15 +1,19 @@
 import { initialDocuments, DocumentRecord, DocumentVersionRecord } from '../seedDocuments';
 import { storageService } from '../storage/StorageService';
 import { auditService } from '../audit/AuditService';
-import { findCaseById } from './caseService';
 
-let documentStore: DocumentRecord[] = [...initialDocuments];
+let documentsStore: DocumentRecord[] = [...initialDocuments];
 
-export function getAllDocuments(filters?: { caseId?: string; category?: string; classification?: string; search?: string }) {
-  let result = [...documentStore];
+export function getAllDocuments(filters?: {
+  caseId?: string;
+  category?: string;
+  classification?: string;
+  search?: string;
+}) {
+  let result = [...documentsStore];
 
   if (filters?.caseId) {
-    result = result.filter((d) => d.caseId === filters.caseId || d.caseNumber === filters.caseId);
+    result = result.filter((d) => d.caseId === filters.caseId);
   }
 
   if (filters?.category && filters.category !== 'ALL') {
@@ -25,8 +29,9 @@ export function getAllDocuments(filters?: { caseId?: string; category?: string; 
     result = result.filter(
       (d) =>
         d.title.toLowerCase().includes(q) ||
-        d.description.toLowerCase().includes(q) ||
-        d.caseNumber.toLowerCase().includes(q)
+        d.caseNumber.toLowerCase().includes(q) ||
+        d.category.toLowerCase().includes(q) ||
+        (d.description && d.description.toLowerCase().includes(q))
     );
   }
 
@@ -34,11 +39,11 @@ export function getAllDocuments(filters?: { caseId?: string; category?: string; 
 }
 
 export function findDocumentById(id: string): DocumentRecord | null {
-  return documentStore.find((d) => d.id === id) || null;
+  return documentsStore.find((d) => d.id === id) || null;
 }
 
 export async function createDocumentWithVersion(
-  buffer: Buffer,
+  fileBuffer: Buffer,
   originalName: string,
   mimeType: string,
   metadata: {
@@ -50,15 +55,12 @@ export async function createDocumentWithVersion(
   },
   user: { id: string; fullName: string; employeeId: string }
 ) {
-  const caseRecord = findCaseById(metadata.caseId);
-  const caseNumber = caseRecord ? caseRecord.caseNumber : metadata.caseId;
-
-  const uploadResult = await storageService.uploadFile(buffer, originalName);
+  const uploadResult = await storageService.uploadFile(fileBuffer, originalName);
 
   const documentId = `doc_${Date.now()}`;
-  const versionId = `ver_${documentId}_1`;
+  const versionId = `ver_${Date.now()}`;
 
-  const newVersion: DocumentVersionRecord = {
+  const initialVersion: DocumentVersionRecord = {
     id: versionId,
     documentId,
     versionNumber: 1,
@@ -70,25 +72,25 @@ export async function createDocumentWithVersion(
     uploadedById: user.id,
     uploadedByFullName: user.fullName,
     uploadedAt: new Date().toISOString(),
-    changeLog: 'Initial file upload & SHA-256 checksum generation',
+    changeLog: 'Initial document upload',
   };
 
   const newDocument: DocumentRecord = {
     id: documentId,
     caseId: metadata.caseId,
-    caseNumber,
-    title: metadata.title || originalName,
+    caseNumber: metadata.caseId.startsWith('CASE') ? metadata.caseId : `CASE-${metadata.caseId}`,
+    title: metadata.title,
     description: metadata.description || '',
-    category: metadata.category || 'POLICE_REPORT',
+    category: metadata.category || 'EVIDENCE',
     classification: metadata.classification || 'CONFIDENTIAL',
     status: 'SUBMITTED',
     currentVersionNumber: 1,
-    versions: [newVersion],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    versions: [initialVersion],
   };
 
-  documentStore.unshift(newDocument);
+  documentsStore.unshift(newDocument);
 
   auditService.logEvent({
     action: 'DOCUMENT_UPLOAD',
@@ -96,7 +98,7 @@ export async function createDocumentWithVersion(
     entityType: 'DOCUMENT',
     entityId: newDocument.id,
     result: 'SUCCESS',
-    details: `Document "${newDocument.title}" uploaded. SHA-256: ${uploadResult.sha256Hash}`,
+    details: `Uploaded document "${newDocument.title}" (v1.0) with SHA-256: ${uploadResult.sha256Hash}`,
   });
 
   return newDocument;
@@ -104,7 +106,7 @@ export async function createDocumentWithVersion(
 
 export async function appendDocumentVersion(
   documentId: string,
-  buffer: Buffer,
+  fileBuffer: Buffer,
   originalName: string,
   mimeType: string,
   changeLog: string,
@@ -113,10 +115,9 @@ export async function appendDocumentVersion(
   const document = findDocumentById(documentId);
   if (!document) throw new Error('Document record not found.');
 
-  const uploadResult = await storageService.uploadFile(buffer, originalName);
-
+  const uploadResult = await storageService.uploadFile(fileBuffer, originalName);
   const nextVersionNumber = document.currentVersionNumber + 1;
-  const versionId = `ver_${documentId}_${nextVersionNumber}`;
+  const versionId = `ver_${Date.now()}`;
 
   const newVersion: DocumentVersionRecord = {
     id: versionId,
@@ -154,7 +155,7 @@ export async function getDocumentFile(documentId: string, versionNumber?: number
   if (!doc) throw new Error('Document record not found.');
 
   const verNum = versionNumber || doc.currentVersionNumber;
-  const version = doc.versions.find((v) => v.versionNumber === verNum) || doc.versions[0];
+  const version = doc.versions.find((v: DocumentVersionRecord) => v.versionNumber === verNum) || doc.versions[0];
 
   try {
     const buffer = await storageService.getFile(version.storageKey);
@@ -192,7 +193,7 @@ export async function verifyIntegrity(documentId: string, versionNumber?: number
   if (!doc) throw new Error('Document record not found.');
 
   const verNum = versionNumber || doc.currentVersionNumber;
-  const version = doc.versions.find((v) => v.versionNumber === verNum) || doc.versions[0];
+  const version = doc.versions.find((v: DocumentVersionRecord) => v.versionNumber === verNum) || doc.versions[0];
 
   try {
     const verification = await storageService.verifyIntegrity(version.storageKey, version.sha256Hash);
@@ -215,13 +216,21 @@ export async function verifyIntegrity(documentId: string, versionNumber?: number
       checkedAt: new Date().toISOString(),
     };
   } catch (err) {
+    auditService.logEvent({
+      action: 'DOCUMENT_INTEGRITY_CHECK',
+      entityType: 'DOCUMENT',
+      entityId: doc.id,
+      result: 'FAILURE',
+      details: `Integrity check for ${version.fileName} (v${version.versionNumber}): FILE CORRUPTED OR TAMPERED`,
+    });
+
     return {
       documentId: doc.id,
       versionNumber: version.versionNumber,
       fileName: version.fileName,
       expectedHash: version.sha256Hash,
-      computedHash: version.sha256Hash,
-      valid: true,
+      computedHash: 'TAMPERED_OR_MISSING_FILE_HASH',
+      valid: false,
       checkedAt: new Date().toISOString(),
     };
   }

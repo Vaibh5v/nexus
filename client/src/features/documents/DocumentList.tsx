@@ -4,17 +4,18 @@ import {
   FileText, 
   Upload, 
   Search, 
-  Download, 
+  Filter, 
   ShieldCheck, 
+  Download, 
+  History, 
+  Send, 
   CheckCircle2, 
-  AlertTriangle,
   Loader2,
   Lock,
   Copy,
   Check,
-  History,
-  Send,
-  Eye
+  Eye,
+  AlertTriangle
 } from 'lucide-react';
 import DocumentUploadModal from './DocumentUploadModal';
 import VersionHistoryModal from './VersionHistoryModal';
@@ -26,7 +27,6 @@ export default function DocumentList() {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [classificationFilter, setClassificationFilter] = useState('ALL');
-  
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [selectedDocForHistory, setSelectedDocForHistory] = useState<any | null>(null);
   const [selectedDocForPreview, setSelectedDocForPreview] = useState<any | null>(null);
@@ -39,17 +39,17 @@ export default function DocumentList() {
   const fetchDocuments = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (categoryFilter !== 'ALL') params.append('category', categoryFilter);
-      if (classificationFilter !== 'ALL') params.append('classification', classificationFilter);
-      if (search) params.append('search', search);
+      const params: any = {};
+      if (search) params.search = search;
+      if (categoryFilter !== 'ALL') params.category = categoryFilter;
+      if (classificationFilter !== 'ALL') params.classification = classificationFilter;
 
-      const response = await api.get(`/documents?${params.toString()}`);
+      const response = await api.get('/documents', { params });
       if (response.data && response.data.success) {
         setDocuments(response.data.documents);
       }
     } catch (err) {
-      console.error('Fetch documents error:', err);
+      console.error('Failed to fetch documents:', err);
     } finally {
       setLoading(false);
     }
@@ -57,7 +57,7 @@ export default function DocumentList() {
 
   useEffect(() => {
     fetchDocuments();
-  }, [categoryFilter, classificationFilter, search]);
+  }, [search, categoryFilter, classificationFilter]);
 
   const handleDownload = async (docId: string, fileName: string) => {
     try {
@@ -101,7 +101,7 @@ export default function DocumentList() {
       if (response.data && response.data.success) {
         setActionNotice(`Document "${title}" submitted for legal review! Status changed to UNDER_REVIEW.`);
         fetchDocuments();
-        setTimeout(() => setActionNotice(null), 4000);
+        setTimeout(() => setActionNotice(null), 5000);
       }
     } catch (err: any) {
       console.error('Submit review error:', err);
@@ -120,21 +120,18 @@ export default function DocumentList() {
   return (
     <div className="space-y-6 font-sans">
       
-      {/* Header & Upload Button */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-[#E2E8F0] shadow-2xs">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-[#172B3A] tracking-tight flex items-center gap-2">
-            <FileText className="w-5 h-5 text-[#155E8A]" />
-            Secure Document Vault &amp; Cryptographic Registry
-          </h2>
-          <p className="text-xs text-[#64748B] mt-0.5">
-            Tamper-evident legal documents verified with SHA-256 cryptographic checksums.
+          <h1 className="text-2xl font-bold text-[#172B3A] tracking-tight">Documents Vault</h1>
+          <p className="text-xs text-[#64748B] pt-0.5">
+            Central secure repository for digital evidence, FIRs, and forensic reports with SHA-256 integrity verification.
           </p>
         </div>
 
         <button
           onClick={() => setIsUploadModalOpen(true)}
-          className="px-4 py-2.5 bg-[#155E8A] hover:bg-[#10496C] text-white text-xs font-bold rounded-xl shadow-xs flex items-center justify-center gap-2 transition-colors"
+          className="px-4 py-2 bg-[#155E8A] hover:bg-[#10496C] text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-2 self-start sm:self-auto"
         >
           <Upload className="w-4 h-4" />
           <span>Upload New Document</span>
@@ -329,17 +326,26 @@ export default function DocumentList() {
                 {/* Real-time Integrity Result Alert */}
                 {vResult && (
                   <div
-                    className={`p-3 rounded-lg border flex items-center justify-between text-xs font-semibold ${
+                    className={`p-3.5 rounded-xl border flex items-center justify-between text-xs font-semibold ${
                       vResult.valid
                         ? 'bg-[#ECFDF5] text-[#16845B] border-[#16845B]/20'
-                        : 'bg-red-50 text-red-700 border-red-200'
+                        : 'bg-red-50 text-red-700 border-red-200 animate-pulse'
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-[#16845B]" />
-                      <span>Cryptographic SHA-256 Verification: MATCH VALID</span>
+                      {vResult.valid ? (
+                        <>
+                          <CheckCircle2 className="w-4 h-4 text-[#16845B]" />
+                          <span>Cryptographic SHA-256 Checksum: MATCH VALID</span>
+                        </>
+                      ) : (
+                        <>
+                          <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                          <span className="font-bold">🚨 INTEGRITY MISMATCH DETECTED: Physical file on disk has been tampered with or modified!</span>
+                        </>
+                      )}
                     </div>
-                    <span className="font-mono text-[10px] text-slate-500">
+                    <span className="font-mono text-[10px] opacity-80">
                       Verified: {new Date(vResult.checkedAt).toLocaleTimeString()}
                     </span>
                   </div>
